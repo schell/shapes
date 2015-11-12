@@ -99,6 +99,7 @@ library
                      , lens >= 4.12
                      , vector
                      , either >= 4.4
+                     , criterion
   
   -- Directories containing source files.
   hs-source-dirs:      src

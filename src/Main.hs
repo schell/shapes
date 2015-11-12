@@ -51,4 +51,5 @@ initialState :: EngineState Double
 initialState = SP ((scene'' :: Scene Double (WorldObj Double)) ^. scWorld) emptyState
 
 main :: IO ()
-main = print . fst' $ stepWorld 10000 initialState
+--main = print . fst' $ stepWorld 10000 initialState
+main = BL.main
