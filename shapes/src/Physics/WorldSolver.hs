@@ -3,16 +3,8 @@
 module Physics.WorldSolver where
 
 import Control.Lens
-
-type SolverGen x s = x -> s -> s
-type SolverFunc k a s = k -> a -> s -> (a, s)
-
-solve :: SolverFunc k a s -> IndexedTraversal' k w a -> w -> s -> (w, s)
-solve f l w s = case ma of Just (k, a) -> (w', s')
-                                where (a', s') = f k a s
-                                      w' = w & l .~ a'
-                           Nothing -> (w, s)
-  where ma = w ^@? l
+import Control.Monad.ST
+import Control.Monad.State.Class
 
 {-
 k = key (object index)
@@ -23,43 +15,37 @@ s = solver state (cache)
 -}
 type WorldLens k w a = k -> Traversal' w a
 -- WSGen :: generate new solver state (update cache)
-type WSGen w k a x s = [k] -> WorldLens k w a -> w -> x -> s -> s
+type WSGen w k a x m = [k] -> WorldLens k w a -> x -> m ()
 -- WSFunc :: update world & solver state
-type WSFunc w k a s = WorldLens k w a -> w -> s -> (w, s)
+type WSFunc w k a m = WorldLens k w a -> m ()
 -- WSChanged :: did the world actually change? (threshold for early exit)
 type WSChanged w = w -> w -> Bool
 -- WSolver :: everything you need to step the world
-type WSolver w k a x s = (WSGen w k a x s, WSFunc w k a s)
+type WSolver w k a x m = (WSGen w k a x m, WSFunc w k a m)
 -- WSolver' :: use one WSFunc to seed the first solver iteration, use the other for subsequent iterations (seed & improve)
-type WSolver' w k a x s = (WSGen w k a x s, WSFunc w k a s, WSFunc w k a s)
-
--- run gen to reset solver state
--- iteratively run func to improve solution (until unchanged; up to n times)
-wsolve_ :: WSGen w k a x s -> WSFunc w k a s -> WSChanged w -> Int -> [k] -> WorldLens k w a -> w -> x -> s -> (w, s)
-wsolve_ g f changed n ks l w x s = wsimprove f changed n l w s1
-  where s1 = g ks l w x s
-
-wsolve :: WSolver w k a x s -> WSChanged w -> Int -> [k] -> WorldLens k w a -> w -> x -> s -> (w, s)
-wsolve = uncurry wsolve_
-
--- use WSGen to fill the solver cache before solving with wsimprove'
-wsolve_' :: WSGen w k a x s -> WSFunc w k a s -> WSFunc w k a s -> WSChanged w -> Int -> [k] -> WorldLens k w a -> w -> x -> s -> (w, s)
-wsolve_' g f0 f changed n ks l w x s = wsimprove' f0 f changed n l w s1
-  where s1 = g ks l w x s
-
-wsolve' :: WSolver' w k a x s -> WSChanged w -> Int -> [k] -> WorldLens k w a -> w -> x -> s -> (w, s)
-wsolve' (g, f0, f) = wsolve_' g f0 f
+type WSolver' w k a x m = (WSGen w k a x m, WSFunc w k a m, WSFunc w k a m)
 
 -- run func to improve solution until unchanged (max n iterations)
-wsimprove :: WSFunc w k a s -> WSChanged w -> Int -> WorldLens k w a -> w -> s -> (w, s)
-wsimprove _ _       0 _ w s = (w, s)
-wsimprove f changed n l w s = (w', s')
-  where (w1, s1) = f l w s
-        (w', s') = if changed w w1 then wsimprove f changed (n - 1) l w1 s1
-                   else (w1, s1)
+wsimprove :: (MonadState (w, s) m) => WSFunc w k a m -> WSChanged w -> Int -> WorldLens k w a -> m ()
+wsimprove _ _       0 _ = return ()
+wsimprove f changed n l = do
+  (w, s) <- get
+  f l
+  (w', s') <- get
+  if changed w w'
+    then wsimprove f changed (n - 1) l
+    else return ()
 
 -- apply first solver function (WSFunc) to seed the solution
 -- iteratively apply second solver function to improve the solution
-wsimprove' :: WSFunc w k a s -> WSFunc w k a s -> WSChanged w -> Int -> WorldLens k w a -> w -> s -> (w, s)
-wsimprove' f0 f1 changed n l w s = wsimprove f1 changed n l w' s'
-  where (w', s') = f0 l w s
+wsimprove' :: (MonadState (w, s) m) => WSFunc w k a m -> WSFunc w k a m -> WSChanged w -> Int -> WorldLens k w a -> m ()
+wsimprove' f0 f1 changed n l = f0 l >> wsimprove f1 changed n l
+
+-- run gen to reset solver state
+-- iteratively run func to improve solution (until unchanged; up to n times)
+wsolve :: (MonadState (w, s) m) => WSGen w k a x m -> WSFunc w k a m -> WSChanged w -> Int -> [k] -> WorldLens k w a -> x -> m ()
+wsolve g f changed n ks l x = g ks l x >> wsimprove f changed n l
+
+-- use WSGen to fill the solver cache before solving with wsimprove'
+wsolve' :: (MonadState (w, s) m) => WSolver' w k a x m -> WSChanged w -> Int -> [k] -> WorldLens k w a -> x -> m ()
+wsolve' (g, f0, f) changed n ks l x = g ks l x >> wsimprove' f0 f changed n l

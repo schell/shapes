@@ -97,8 +97,11 @@ library
   build-depends:       array
                      , base
                      , containers
+                     , hashtables
                      , linear
                      , lens
+                     , mtl
+                     , transformers
                      , vector
                      , either
   
@@ -131,6 +134,8 @@ executable shapes-prof
                      , containers
                      , linear
                      , lens
+                     , mtl
+                     , transformers
                      , vector
                      , either
                      , criterion
