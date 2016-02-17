@@ -132,6 +132,7 @@ executable shapes-prof
   build-depends:       array
                      , base
                      , containers
+                     , hashtables
                      , linear
                      , lens
                      , mtl
