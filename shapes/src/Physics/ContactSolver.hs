@@ -94,8 +94,11 @@ pairCacheInitializer pairKey ab mFeaturePairCaches worldCache =
   where mFeaturePairCaches' = updatePairCache featurePairCgens emptySln mFeaturePairCaches
         (featurePairCgens, worldCache') = wcApplyCgen' worldCache pairKey ab
 
+worldCacheInitializer' :: n -> WorldCache n a -> WorldCache n a
+worldCacheInitializer' dt worldCache = worldCache & wcDt .~ dt
+
 worldCacheInitializer :: CS.WorldCacheInitializer a n (WorldCache n a)
-worldCacheInitializer pairKeys l world dt worldCache = worldCache & wcDt .~ dt
+worldCacheInitializer _ _ _ = worldCacheInitializer'
 
 -- TODO: traverse/fold these IntMaps directly instead of folding over keys
 --       to get rid of some of these fromJusts (also in ConstraintSolver)

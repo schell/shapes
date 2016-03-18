@@ -1,80 +1,76 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE TemplateHaskell #-}
 
-module WorldSolverST where
+module Physics.WorldSolverST where
 
 import Physics.WorldSolver
 
 import Control.Lens
 import Control.Monad.State.Strict
+import Control.Monad.Reader
 import Control.Monad.ST
 import qualified Data.HashTable.ST.Linear as H
+import qualified Data.HashTable.Class as HC
 import Data.Maybe
 import Physics.PairMap (Key)
 import Physics.World (World(..))
 import Utils.Utils
-import Physics.ConstraintSolver (PairCacheInitializer, PairUpdater, WorldCacheInitializer)
+
+-- TODO: Put HashTable and dt into ReaderT, World into StateT, ST as base monad
 
 type HashTable s k v = H.HashTable s k v
 
-data WorldSolverState s pairCache worldCache =
-  WorldSolverState { _wssPairCaches :: !(HashTable s Key pairCache)
-                   , _wssWorldCache :: !worldCache
-                   } deriving (Show)
-makeLenses ''WorldSolverState
+data WorldState worldObj worldCache =
+  WorldState { _wsWorld :: World worldObj
+             , _wsCache :: worldCache
+             } deriving (Show)
+makeLenses ''WorldState
 
-type WorldState worldObj solverState = SP (World worldObj) solverState
+type WorldM s worldObj pairCache worldCache =
+  StateT (WorldState worldObj worldCache) (ReaderT (HashTable s Key pairCache) (ST s))
 
-type WorldStateM s worldObj solverState =
-  StateT (WorldState worldObj solverState) (ST s)
+prepareNextFramePairCache :: (Key -> Pair wObj -> Maybe pCache -> wCache -> (Maybe pCache, wCache))
+                          -> Key
+                          -> Pair wObj
+                          -> WorldM s wObj pCache wCache ()
+prepareNextFramePairCache stepWorldCache pairKey pair = do
+  pCaches <- ask
+  pCache <- lift . lift $ H.lookup pCaches pairKey
+  wCache <- use wsCache
+  let (pCache', wCache') = stepWorldCache pairKey pair pCache wCache
+  wsCache .= wCache'
+  maybe (return ()) (lift . lift . (H.insert pCaches pairKey)) pCache'
 
-type WorldStateM' s worldObj pairCache worldCache =
-  WorldStateM s worldObj (WorldSolverState s pairCache worldCache)
+prepareNextFrame :: (x -> wCache -> wCache)
+                 -> (Key -> Pair wObj -> Maybe pCache -> wCache -> (Maybe pCache, wCache))
+                 -> x
+                 -> [(Key, Pair wObj)]
+                 -> WorldM s wObj pCache wCache ()
+prepareNextFrame stepWorldCache stepPairCache dt keyedPairs = do
+  wsCache %= stepWorldCache dt
+  mapM_ (uncurry $ prepareNextFramePairCache stepPairCache) keyedPairs
 
-initOnePairCache :: PairCacheInitializer a c wc
-                 -> Key
-                 -> WorldLens Key (World a) (a, a)
-                 -> WorldStateM' s a c wc ()
-initOnePairCache pairCacheInit pairKey l = do
-  SP world (WorldSolverState pairCaches worldCache) <- get
-  -- calculate updated pairCache and worldCache
-  srcPairCache <- lift $ H.lookup pairCaches pairKey
-  -- TODO: figure out a way to get rid of these fromJusts
-  let ab = fromJust $ world ^? l pairKey
-      (pairCache, worldCache') = pairCacheInit pairKey ab srcPairCache worldCache
-  -- insert updated pairCache
-  case pairCache of Just pc -> lift $ H.insert pairCaches pairKey pc
-                    Nothing -> return ()
-  -- insert updated worldCache
-  spSnd.wssWorldCache .= worldCache'
-
-initConstraintSolverState :: PairCacheInitializer a c wc
-                          -> WorldCacheInitializer a x wc
-                          -> WSGen (World a) Key (a, a) x (WorldStateM' s a c wc)
-initConstraintSolverState pairCacheInit worldCacheInit pairKeys l dt = do
-  SP world solverState <- get
-  spSnd.wssWorldCache %= worldCacheInit pairKeys l world dt
-  mapM_ (\pairKey -> initOnePairCache pairCacheInit pairKey l) pairKeys
-
-improveOne :: PairUpdater a c wc
+improveOne :: (Key -> Pair wObj -> pCache -> wCache -> (Pair wObj, pCache, wCache))
+           -> WorldLens Key (World wObj) (Pair wObj)
            -> Key
-           -> WorldLens Key (World a) (a, a)
-           -> WorldStateM' s a c wc ()
-improveOne pairUpdater pairKey l = do
-  SP world (WorldSolverState pairCaches worldCache) <- get
-  -- TODO: figure out a way to get rid of these fromJusts
-  Just pairCache <- lift $ H.lookup pairCaches pairKey
-  let ab = fromJust $ world ^? l pairKey
-      (ab', pairCache', worldCache') = pairUpdater pairKey ab pairCache worldCache
-  -- TODO: find a better way to do these state updates
-  spFst.l pairKey .= ab'
-  lift $ H.insert pairCaches pairKey pairCache'
-  spSnd.wssWorldCache .= worldCache'
+           -> Pair wObj
+           -> pCache
+           -> WorldM s wObj pCache wCache ()
+improveOne solvePair l pairKey pair pCache = do
+  WorldState world wCache <- get
+  let (pair', pCache', wCache') = solvePair pairKey pair pCache wCache
+      world' = world & l pairKey .~ pair'
+  put $ WorldState world' wCache'
+  pCaches <- ask
+  lift . lift $ H.insert pCaches pairKey pCache'
 
-improve :: PairUpdater a c wc -> WSFunc (World a) Key (a, a) (WorldStateM' s a c wc)
-improve pairUpdater l = do
-  (world0, csState0) <- get
-  let pairKeys = keys (csState0 ^. csPairCaches)
-  put $ foldl' f (world0, csState0) pairKeys
-  where f (world, csState) pairKey =
-          improveOne pairUpdater pairKey l world csState
+improve :: (Key -> Pair wObj -> pCache -> wCache -> (Pair wObj, pCache, wCache))
+        -> WorldLens Key (World wObj) (Pair wObj)
+        -> WorldM s wObj pCache wCache ()
+improve solvePair l = do
+  pCaches <- ask
+  keyedPCaches <- lift . lift $ HC.toList pCaches
+  world <- use wsWorld
+  -- TODO: is there a way to get rid of this fromJust?
+  let keyPairPCaches = fmap (\(k, pc) -> (k, fromJust $ world ^? l k, pc)) keyedPCaches
+  mapM_ (\(k, p, pc) -> improveOne solvePair l k p pc) keyPairPCaches
