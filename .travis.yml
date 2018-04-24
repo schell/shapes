@@ -79,7 +79,8 @@ before_install:
 
 - sudo apt-get update -qq
 - apt-cache show libsdl2-dev
-- sudo apt-get install -qq libsdl2-dev
+- sudo apt-get install -qq aptitude
+- sudo aptitude install libsdl2-dev
 
 # Get the list of packages from the stack.yaml file
 - PACKAGES=$(stack --install-ghc query locals | grep '^ *path' | sed 's@^ *path:@@')
