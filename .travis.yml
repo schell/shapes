@@ -116,6 +116,7 @@ install:
     cabal)
       cabal --version
       travis_retry cabal update
+      stack exec hpack
       cabal new-build --only-dependencies $CABALARGS all
       ;;
   esac
