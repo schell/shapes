@@ -91,7 +91,7 @@ before_install:
     travis_retry curl -L https://www.stackage.org/stack/linux-x86_64 | tar xz --wildcards --strip-components=1 -C ~/.local/bin '*/stack'
   fi
 
-- sudo apt-get install -y hpack
+- stack install hpack
 
 # Download, make and install SDL2-2.0.8 (stable)
 - |
