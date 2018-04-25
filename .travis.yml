@@ -100,6 +100,7 @@ before_install:
   ./configure
   make
   sudo make install
+  echo $LD_LIBRARY_PATH
 
 - PACKAGES=$(stack --install-ghc query locals | grep '^ *path' | sed 's@^ *path:@@')
 
