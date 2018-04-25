@@ -91,6 +91,8 @@ before_install:
     travis_retry curl -L https://www.stackage.org/stack/linux-x86_64 | tar xz --wildcards --strip-components=1 -C ~/.local/bin '*/stack'
   fi
 
+- sudo apt-get install -y hpack
+
 # Download, make and install SDL2-2.0.8 (stable)
 - |
   travis_retry curl -L https://www.libsdl.org/release/SDL2-2.0.8.tar.gz | tar xz
@@ -116,7 +118,7 @@ install:
     cabal)
       cabal --version
       travis_retry cabal update
-      stack exec hpack
+      hpack
       cabal new-build --only-dependencies $CABALARGS all
       ;;
   esac
