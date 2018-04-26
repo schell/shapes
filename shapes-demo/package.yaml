@@ -25,7 +25,7 @@ dependencies:
 - linear
 - monad-extras
 - mtl
-- sdl2 >= 2.3
+- sdl2 >= 2.4.0.1
 - shapes
 - StateVar
 - text
